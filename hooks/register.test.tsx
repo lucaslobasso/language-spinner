@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { conjugate, japanese } from './packs/japanese'
-import { createDeck, parseCommand, parseWordFile } from './register'
+import { createDeck, parseCommand, parseEntries, tokenize } from './register'
 
 const texts = (reading: string, group: 'godan' | 'ichidan' | 'irregular', gloss: string) =>
   conjugate(reading, group, gloss).map(it => `${it.text}| ${it.gloss}`)
@@ -68,11 +68,11 @@ test('the Japanese pack has 5 forms of each of its 21 verbs', () => {
   expect(japanese()).toHaveLength(105)
 })
 
-test('a word file keeps valid rows and refuses a non-list', () => {
-  expect(parseWordFile('[{"text":"comer","gloss":"to eat"},{"text":"","gloss":"x"},{"gloss":"y"},7]'))
+test("a pack's output keeps valid rows and refuses a non-list", () => {
+  expect(parseEntries('[{"text":"comer","gloss":"to eat"},{"text":"","gloss":"x"},{"gloss":"y"},7]'))
     .toEqual([{ text: 'comer', gloss: 'to eat' }])
-  expect(() => parseWordFile('{"text":"comer"}')).toThrow()
-  expect(() => parseWordFile('not json')).toThrow()
+  expect(() => parseEntries('{"text":"comer"}')).toThrow()
+  expect(() => parseEntries('not json')).toThrow()
 })
 
 // A fixed sequence, so the shuffles are the same on every run.
@@ -106,8 +106,8 @@ test('the deck copes with one word and with none', () => {
   expect(createDeck([]).next()).toBeUndefined()
 })
 
-test('rows of a word file can share a verb', () => {
-  expect(parseWordFile('[{"text":"como","gloss":"I eat","verb":"comer"},{"text":"comes","gloss":"you eat","verb":"comer"}]'))
+test('rows of a pack can share a verb', () => {
+  expect(parseEntries('[{"text":"como","gloss":"I eat","verb":"comer"},{"text":"comes","gloss":"you eat","verb":"comer"}]'))
     .toEqual([
       { text: 'como', gloss: 'I eat', verb: 'comer' },
       { text: 'comes', gloss: 'you eat', verb: 'comer' },
@@ -121,13 +121,30 @@ test('/spinner picks one setting to change', () => {
   expect(parseCommand('interval 5')).toMatchObject({ field: 'intervalSeconds', value: 5 })
   expect(parseCommand('rotate 30')).toMatchObject({ field: 'rotateSeconds', value: 30 })
   expect(parseCommand('rotate 0')).toMatchObject({ field: 'rotateSeconds', value: 0 })
-  expect(parseCommand('pack none')).toMatchObject({ field: 'pack', value: 'none' })
-  expect(parseCommand('file C:\\My Words\\es.json')).toMatchObject({ field: 'wordFile', value: 'C:\\My Words\\es.json' })
-  expect(parseCommand('file')).toMatchObject({ field: 'wordFile', value: '' })
+  expect(parseCommand('pack study')).toEqual({ pack: 'study' })
+  expect(parseCommand('packs')).toEqual({ packs: true })
+  expect(parseCommand('refresh')).toEqual({ refresh: true })
+  expect(parseCommand('remove study')).toEqual({ remove: 'study' })
+})
+
+test('/spinner add takes a name, a command and an optional folder', () => {
+  expect(parseCommand('add study python scripts/spinner.py')).toEqual({
+    add: { name: 'study', spec: { argv: ['python', 'scripts/spinner.py'] } },
+  })
+  expect(parseCommand('add study python C:\\repo\\spinner.py --cwd C:\\repo')).toEqual({
+    add: { name: 'study', spec: { argv: ['python', 'C:\\repo\\spinner.py'], cwd: 'C:\\repo' } },
+  })
+  expect(parseCommand('add study "C:\\My Tools\\pack.exe" --json')).toEqual({
+    add: { name: 'study', spec: { argv: ['C:\\My Tools\\pack.exe', '--json'] } },
+  })
+  expect(tokenize('a "b c" d')).toEqual(['a', 'b c', 'd'])
 })
 
 test('/spinner refuses what it cannot use', () => {
-  for (const bad of ['interval', 'interval 0', 'interval x', 'rotate -1', 'rotate', 'pack french', 'banana']) {
+  const bads = ['interval', 'interval 0', 'interval x', 'rotate -1', 'rotate', 'pack', 'pack bad!name', 'remove', 'add',
+    'add study', 'add bad!name python x.py', 'add study python x.py --cwd', 'banana']
+
+  for (const bad of bads) {
     expect(parseCommand(bad)).toHaveProperty('error')
   }
 })
@@ -296,3 +313,128 @@ test(
     await ui.unmount()
   },
 )
+
+const PACKS = { study: { argv: ['python', 'spinner.py'] } }
+const ROWS = [
+  { text: 'さけぶ', gloss: 'I shout', verb: 'さけぶ' },
+  { text: 'わらう', gloss: 'I laugh', verb: 'わらう' },
+]
+const printed = (rows: unknown, code = 0, stderr = '') => ({
+  value: { exitCode: code, stdout: JSON.stringify(rows), stderr },
+})
+const start = ($: any, on: any) => {
+  on('command.register', () => ({ value: { command: 'spinner' } }))
+  on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
+
+  return $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+}
+
+test('a command pack runs when the session starts and its phrases are drawn', { options: { pack: 'study' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on, { packs: PACKS })
+  const ran: unknown[] = []
+  on('process.run', (_, e) => {
+    ran.push(e.argv)
+
+    return printed(ROWS)
+  })
+  draw(on)
+
+  await start($, on)
+  await clock.settle()
+
+  expect(ran).toEqual([['python', 'spinner.py']])
+
+  const ui = await $.ui.mount(SPINNER)
+
+  expect((await ui.find({ type: 'Text' }))?.text).toBe('さけぶ· I shout …')
+  await ui.unmount()
+})
+
+test('a failing pack keeps its last good list and says why', { options: { pack: 'study' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on, { packs: PACKS, 'cache:study': ROWS })
+  const toasts: string[] = []
+  on('process.run', () => printed([], 1, 'boom\nKeyError: x'))
+  on('ui.toast', (_, e) => {
+    toasts.push(e.text)
+
+    return { value: undefined }
+  })
+  draw(on)
+
+  await start($, on)
+  await clock.settle()
+
+  expect(toasts).toHaveLength(1)
+  expect(toasts[0]).toContain('study')
+  expect(toasts[0]).toContain('KeyError: x')
+
+  const ui = await $.ui.mount(SPINNER)
+
+  expect((await ui.find({ type: 'Text' }))?.text).toBe('さけぶ· I shout …')
+  await ui.unmount()
+})
+
+test('a pack that prints nothing usable falls back to the built-in japanese', { options: { pack: 'study' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on, { packs: PACKS })
+  on('process.run', () => ({ value: { exitCode: 0, stdout: 'not json', stderr: '' } }))
+  on('ui.toast', () => ({ value: undefined }))
+  draw(on)
+
+  await start($, on)
+  await clock.settle()
+
+  const ui = await $.ui.mount(SPINNER)
+
+  expect((await ui.find({ type: 'Text' }))?.text).toBe("たべている· I'm eating …")
+  await ui.unmount()
+})
+
+test('/spinner refresh reruns the pack and reports what it found', { options: { pack: 'study' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on, { packs: PACKS })
+  let rows: unknown[] = ROWS.slice(0, 1)
+  on('process.run', () => printed(rows))
+  draw(on)
+
+  await start($, on)
+  await clock.settle()
+
+  rows = [...ROWS, { text: 'ないる', gloss: 'I cry', verb: 'ないる' }]
+  const out = await $.command.run({ command: 'spinner', args: 'refresh' })
+
+  expect(out.text).toBe('Refreshed "study": 3 words, 3 phrases.')
+})
+
+test('/spinner add, packs and remove manage the packs the user added', async ($, on) => {
+  mock.store(on, {})
+
+  const run = async (args: string) => ($ as any).command.run({ command: 'spinner', args }).then((r: any) => r.text as string)
+
+  expect(await run('add japanese python x.py')).toContain('built-in')
+  expect(await run('add study python spinner.py --cwd C:\\repo')).toContain('/spinner pack study')
+  expect(await run('packs')).toBe('* japanese (built-in)\n  study')
+  expect(await run('remove japanese')).toContain("can't be removed")
+  expect(await run('remove nope')).toContain('no pack named')
+  expect(await run('remove study')).toBe('Removed pack "study".')
+  expect(await run('packs')).toBe('* japanese (built-in)')
+})
+
+test('/spinner pack switches only to a pack that exists', async ($, on) => {
+  mock.store(on, { packs: PACKS })
+  const set: unknown[] = []
+  on('config.set', (_, e) => {
+    set.push({ key: e.key, value: e.value })
+
+    return { value: e.value }
+  })
+
+  const run = async (args: string) => ($ as any).command.run({ command: 'spinner', args }).then((r: any) => r.text as string)
+
+  expect(await run('pack ghost')).toContain('no pack named')
+  expect(set).toEqual([])
+  expect(await run('pack study')).toBe('Switched to "study".')
+  expect(set).toEqual([{ key: 'language-spinner.pack', value: 'study' }])
+})

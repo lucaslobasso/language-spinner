@@ -1,7 +1,7 @@
 {
   "name": "language-spinner",
-  "version": "0.2.0",
-  "description": "Learn a language while Claude thinks: the spinner shows a phrase in your target language with its translation",
+  "version": "0.3.0",
+  "description": "Learn a language while Claude thinks: the spinner shows a phrase in your target language with its translation, from packs you can write yourself",
   "author": {
     "name": "lucaslobasso"
   },
@@ -11,19 +11,9 @@
   "userConfig": {
     "pack": {
       "type": "string",
-      "title": "Starter pack",
-      "description": "Built-in phrases. japanese: common verbs conjugated (I'm eating, I want to eat...). none: only your word file",
-      "options": [
-        "japanese",
-        "none"
-      ],
+      "title": "Pack",
+      "description": "Where the phrases come from: a built-in pack (japanese) or a pack you added with /spinner add. Change it with /spinner pack NAME",
       "default": "japanese"
-    },
-    "wordFile": {
-      "type": "string",
-      "title": "Word file",
-      "description": "Absolute path to your own JSON file: [{\"text\": \"comer\", \"gloss\": \"to eat\"}, ...]. Leave empty to use only the starter pack",
-      "default": ""
     },
     "display": {
       "type": "string",
@@ -44,7 +34,7 @@
     "rotateSeconds": {
       "type": "number",
       "title": "New phrase every (seconds)",
-      "description": "Switch to a new phrase after this many seconds of the same turn. 0 keeps one phrase per turn",
+      "description": "Switch to a different word after this many seconds of the same turn. 0 keeps one phrase per turn",
       "default": 20
     },
     "separator": {
