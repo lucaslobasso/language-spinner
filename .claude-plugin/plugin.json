@@ -1,0 +1,57 @@
+{
+  "name": "language-spinner",
+  "version": "0.1.0",
+  "description": "Learn a language while Claude thinks: the spinner shows a phrase in your target language with its translation",
+  "author": {
+    "name": "lucaslobasso"
+  },
+  "homepage": "https://github.com/lucaslobasso/language-spinner",
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "pack": {
+      "type": "string",
+      "title": "Starter pack",
+      "description": "Built-in phrases. japanese: common verbs conjugated (I'm eating, I want to eat...). none: only your word file",
+      "options": [
+        "japanese",
+        "none"
+      ],
+      "default": "japanese"
+    },
+    "wordFile": {
+      "type": "string",
+      "title": "Word file",
+      "description": "Absolute path to your own JSON file: [{\"text\": \"comer\", \"gloss\": \"to eat\"}, ...]. Leave empty to use only the starter pack",
+      "default": ""
+    },
+    "display": {
+      "type": "string",
+      "title": "Display",
+      "description": "same-line: phrase and translation together. alternate: phrase first, then its translation",
+      "options": [
+        "same-line",
+        "alternate"
+      ],
+      "default": "same-line"
+    },
+    "intervalSeconds": {
+      "type": "number",
+      "title": "Alternate interval (seconds)",
+      "description": "In alternate display, how long the phrase and then the translation each stay up",
+      "default": 3
+    },
+    "rotateSeconds": {
+      "type": "number",
+      "title": "New phrase every (seconds)",
+      "description": "Switch to a new phrase after this many seconds of the same turn. 0 keeps one phrase per turn",
+      "default": 15
+    },
+    "separator": {
+      "type": "string",
+      "title": "Separator",
+      "description": "What goes between phrase and translation in same-line display",
+      "default": "· "
+    }
+  }
+}
