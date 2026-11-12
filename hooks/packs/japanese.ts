@@ -90,16 +90,17 @@ export function conjugate(reading: string, group: Group, gloss: string): Entry[]
 
   const [head = '', ...rest] = gloss.split(' ')
   const doing = [ing(head), ...rest].join(' ')
+  const verb = reading
   const out: Entry[] = []
 
   if (!NO_PROGRESSIVE.has(reading)) {
-    out.push({ text: `${f.te}いる`, gloss: `I'm ${doing}` })
-    out.push({ text: `${f.te}いました`, gloss: `I was ${doing}` })
+    out.push({ text: `${f.te}いる`, gloss: `I'm ${doing}`, verb })
+    out.push({ text: `${f.te}いました`, gloss: `I was ${doing}`, verb })
   }
 
-  out.push({ text: f.vol, gloss: `let's ${gloss}` })
-  out.push({ text: f.tai, gloss: `I want to ${gloss}` })
-  out.push({ text: f.pot, gloss: `I can ${gloss}` })
+  out.push({ text: f.vol, gloss: `let's ${gloss}`, verb })
+  out.push({ text: f.tai, gloss: `I want to ${gloss}`, verb })
+  out.push({ text: f.pot, gloss: `I can ${gloss}`, verb })
 
   return out
 }

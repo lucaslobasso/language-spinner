@@ -4,10 +4,14 @@ import type { Register } from 'claude-code'
 import type { Entry, View } from '../types'
 import { japanese } from './packs/japanese'
 
-const START: View = { base: 0, offset: 0, phase: 0 }
-const view = atom({ plugin: 'language-spinner', key: 'view' } as const, START)
+const START: View = { index: 0, phase: 0 }
+// The shape tag declines a value an earlier version stored (it held base and offset).
+const view = atom({ plugin: 'language-spinner', key: 'view' } as const, START, { shape: 'view-2' })
 
-/** The entries of a word file's text; throws when it is not a list of { text, gloss }. */
+/**
+ * The entries of a word file's text; throws when it is not a list of { text, gloss }.
+ * A row may also carry `verb`: rows sharing one are forms of a single word.
+ */
 export function parseWordFile(text: string): Entry[] {
   const data: unknown = JSON.parse(text)
 
@@ -16,11 +20,52 @@ export function parseWordFile(text: string): Entry[] {
   }
 
   return data.flatMap(row => {
-    const { text: t, gloss } = (row ?? {}) as Record<string, unknown>
+    const { text: t, gloss, verb } = (row ?? {}) as Record<string, unknown>
 
-    return typeof t === 'string' && typeof gloss === 'string' && t !== '' ? [{ text: t, gloss }] : []
+    if (typeof t !== 'string' || typeof gloss !== 'string' || t === '') {
+      return []
+    }
+
+    return [typeof verb === 'string' && verb !== '' ? { text: t, gloss, verb } : { text: t, gloss }]
   })
 }
+
+/**
+ * Hands out the groups in a shuffled order, every group once before any repeats, and never
+ * the same group twice in a row, even where one round ends and the next begins.
+ */
+export function createDeck(groups: readonly string[], random: () => number = Math.random) {
+  let bag: string[] = []
+  let last: string | undefined
+
+  return {
+    next(): string | undefined {
+      if (groups.length === 0) {
+        return undefined
+      }
+
+      if (bag.length === 0) {
+        bag = [...groups]
+
+        for (let i = bag.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(random() * (i + 1))
+          ;[bag[i], bag[j]] = [bag[j] as string, bag[i] as string]
+        }
+
+        // The next draw comes off the end: keep it from repeating the last one drawn.
+        if (bag.length > 1 && bag[bag.length - 1] === last) {
+          ;[bag[0], bag[bag.length - 1]] = [bag[bag.length - 1] as string, bag[0] as string]
+        }
+      }
+
+      last = bag.pop()
+
+      return last
+    },
+  }
+}
+
+const groupOf = (entry: Entry) => entry.verb ?? entry.text
 
 const HINT = 'alternate | same-line | interval N | rotate N | pack japanese|none | file PATH'
 
@@ -73,8 +118,27 @@ export const register: Register = (on, options) => {
   const separator = typeof options.separator === 'string' ? options.separator : '· '
   const wordFile = typeof options.wordFile === 'string' ? options.wordFile.trim() : ''
 
-  let entries: Entry[] = options.pack === 'none' ? [] : japanese()
+  let entries: Entry[] = []
+  let byGroup = new Map<string, number[]>()
+  let deck = createDeck([])
   let stop: (() => void) | null = null
+
+  // Whenever the entries change: regroup them by word and deal a fresh deck of words.
+  const load = (next: Entry[]) => {
+    entries = next
+    byGroup = new Map()
+    entries.forEach((entry, index) => byGroup.set(groupOf(entry), [...(byGroup.get(groupOf(entry)) ?? []), index]))
+    deck = createDeck([...byGroup.keys()])
+  }
+
+  // The next word from the deck, as one of its forms picked at random.
+  const draw = (): number => {
+    const forms = byGroup.get(deck.next() ?? '') ?? []
+
+    return forms[Math.floor(Math.random() * forms.length)] ?? 0
+  }
+
+  load(options.pack === 'none' ? [] : japanese())
 
   on('command.run', { command: 'spinner' }, async ($, e) => {
     const change = parseCommand(e.args ?? '')
@@ -106,7 +170,7 @@ export const register: Register = (on, options) => {
         const own = parseWordFile(await $.fs.read(wordFile))
         const seen = new Set(own.map(it => it.text))
         // The person's own words come first; the pack fills in what they lack.
-        entries = [...own, ...entries.filter(it => !seen.has(it.text))]
+        load([...own, ...entries.filter(it => !seen.has(it.text))])
       } catch {
         $.ui.toast(`language-spinner: could not read the word file ${wordFile}`)
       }
@@ -119,21 +183,30 @@ export const register: Register = (on, options) => {
     stop?.()
     stop = null
 
-    const base = Math.floor(Math.random() * Math.max(entries.length, 1))
-    let shown: View = { base, offset: 0, phase: 0 }
+    // Each turn opens on a different word from the last one shown.
+    let shown: View = { index: draw(), phase: 0 }
     await update($, view, () => shown)
 
     if (isAlternate || rotate > 0) {
       let elapsed = 0
+      let switchedAt = 0
       const timer = $.clock.every(1000, () => {
         elapsed += 1
-        const offset = rotate > 0 ? Math.floor(elapsed / rotate) : 0
-        const phase = isAlternate && Math.floor(elapsed / interval) % 2 === 1 ? 1 : 0
+        let now = shown
+
+        if (rotate > 0 && elapsed - switchedAt >= rotate) {
+          // A different word, not another form of this one, shown from its phrase first.
+          switchedAt = elapsed
+          now = { index: draw(), phase: 0 }
+        } else if (isAlternate) {
+          const phase = Math.floor((elapsed - switchedAt) / interval) % 2 === 1 ? 1 : 0
+          now = phase === shown.phase ? shown : { ...shown, phase }
+        }
 
         // Write only when what is drawn changes, so the spinner redraws no more than it must.
-        if (offset !== shown.offset || phase !== shown.phase) {
-          shown = { base, offset, phase }
-          void update($, view, () => shown)
+        if (now !== shown) {
+          shown = now
+          void update($, view, () => now)
         }
       })
       stop = () => timer.cancel()
@@ -155,8 +228,8 @@ export const register: Register = (on, options) => {
       return next(e)
     }
 
-    const { base, offset, phase } = await read($, view)
-    const entry = entries[(base + offset) % entries.length]
+    const { index, phase } = await read($, view)
+    const entry = entries[index] ?? entries[0]
 
     if (entry === undefined) {
       return next(e)

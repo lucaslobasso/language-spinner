@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { conjugate, japanese } from './packs/japanese'
-import { parseCommand, parseWordFile } from './register'
+import { createDeck, parseCommand, parseWordFile } from './register'
 
 const texts = (reading: string, group: 'godan' | 'ichidan' | 'irregular', gloss: string) =>
   conjugate(reading, group, gloss).map(it => `${it.text}| ${it.gloss}`)
@@ -73,6 +73,45 @@ test('a word file keeps valid rows and refuses a non-list', () => {
     .toEqual([{ text: 'comer', gloss: 'to eat' }])
   expect(() => parseWordFile('{"text":"comer"}')).toThrow()
   expect(() => parseWordFile('not json')).toThrow()
+})
+
+// A fixed sequence, so the shuffles are the same on every run.
+const seeded = (seed: number) => () => {
+  seed = (seed * 1664525 + 1013904223) % 4294967296
+
+  return seed / 4294967296
+}
+
+test('the deck deals every word once a round and never the same twice in a row', () => {
+  const words = ['a', 'b', 'c', 'd']
+
+  for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
+    const deck = createDeck(words, seeded(seed))
+    const drawn = Array.from({ length: 40 }, () => deck.next() as string)
+
+    for (let round = 0; round < 10; round += 1) {
+      expect([...drawn.slice(round * 4, round * 4 + 4)].sort()).toEqual(words)
+    }
+
+    for (let i = 1; i < drawn.length; i += 1) {
+      expect(drawn[i]).not.toBe(drawn[i - 1])
+    }
+  }
+})
+
+test('the deck copes with one word and with none', () => {
+  const one = createDeck(['only'])
+
+  expect([one.next(), one.next()]).toEqual(['only', 'only'])
+  expect(createDeck([]).next()).toBeUndefined()
+})
+
+test('rows of a word file can share a verb', () => {
+  expect(parseWordFile('[{"text":"como","gloss":"I eat","verb":"comer"},{"text":"comes","gloss":"you eat","verb":"comer"}]'))
+    .toEqual([
+      { text: 'como', gloss: 'I eat', verb: 'comer' },
+      { text: 'comes', gloss: 'you eat', verb: 'comer' },
+    ])
 })
 
 test('/spinner picks one setting to change', () => {
@@ -182,6 +221,53 @@ test('the phrase switches after 20 seconds of one turn', async ($, on) => {
   const second = (await ui.find({ type: 'Text' }))?.text
   expect(second).not.toBe(first)
   expect(second).toContain('·')
+  await ui.unmount()
+})
+
+test('every switch lands on a different verb, not another form of the same one', async ($, on) => {
+  const verbOf = new Map(japanese().map(entry => [entry.text, entry.verb]))
+  const clock = mock.clock(on)
+  on('prompt.submit', (_, e) => e)
+  draw(on)
+
+  await $.prompt.submit({ text: 'hi' })
+  const ui = await $.ui.mount(SPINNER)
+  const seen: (string | undefined)[] = []
+
+  for (let i = 0; i < 25; i += 1) {
+    const shown = (await ui.find({ type: 'Text' }))?.text ?? ''
+    seen.push(verbOf.get(shown.split('·')[0] ?? ''))
+    await clock.advance(20000)
+  }
+
+  expect(seen).not.toContain(undefined)
+
+  for (let i = 1; i < seen.length; i += 1) {
+    expect(seen[i]).not.toBe(seen[i - 1])
+  }
+
+  expect(new Set(seen).size).toBeGreaterThan(10)
+  await ui.unmount()
+})
+
+test('a new turn opens on a different verb than the last one shown', async ($, on) => {
+  const verbOf = new Map(japanese().map(entry => [entry.text, entry.verb]))
+  on('prompt.submit', (_, e) => e)
+  draw(on)
+
+  const ui = await $.ui.mount(SPINNER)
+  const seen: (string | undefined)[] = []
+
+  for (let i = 0; i < 30; i += 1) {
+    await $.prompt.submit({ text: 'hi' })
+    const shown = (await ui.find({ type: 'Text' }))?.text ?? ''
+    seen.push(verbOf.get(shown.split('·')[0] ?? ''))
+  }
+
+  for (let i = 1; i < seen.length; i += 1) {
+    expect(seen[i]).not.toBe(seen[i - 1])
+  }
+
   await ui.unmount()
 })
 

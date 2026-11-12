@@ -51,7 +51,9 @@ Make a JSON file with a list of `text` / `gloss` pairs and put its path in the W
 ]
 ```
 
-Entries missing `text` or `gloss` are ignored. If the file can't be read you get one notice and the starter pack is used.
+Entries missing `text` or `gloss` are ignored.
+
+The spinner always moves to a different word, never to another form of the same one (every word comes up once before any repeats). If your file lists several forms of one word, give them a shared `"verb"` so they count as one word: `{ "text": "como", "gloss": "I eat", "verb": "comer" }`. Rows without `verb` each count as their own word. If the file can't be read you get one notice and the starter pack is used.
 
 ## Adding a pack
 
