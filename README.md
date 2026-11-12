@@ -23,9 +23,22 @@ Open the plugin's rows in the `/config` menu.
 | Starter pack | `japanese` | Built-in phrases. `none` uses only your word file. |
 | Word file | empty | Absolute path to your own JSON file (below). Your words come first. |
 | Display | `same-line` | `same-line` shows phrase and translation together. `alternate` shows the phrase, then its translation. |
-| Alternate interval | `3` | Seconds each half stays up in `alternate`. |
-| New phrase every | `15` | Switch to a different phrase after this many seconds of one turn. `0` keeps one phrase per turn. |
+| Alternate interval | `5` | Seconds each half stays up in `alternate`. |
+| New phrase every | `20` | Switch to a different phrase after this many seconds of one turn. `0` keeps one phrase per turn. |
 | Separator | `· ` | Text between phrase and translation in `same-line`. |
+
+### Change settings from the prompt
+
+`/spinner` flips the same settings without opening `/config`:
+
+| Command | Does |
+| --- | --- |
+| `/spinner` | Show the current settings |
+| `/spinner alternate` · `/spinner same-line` | Switch the display |
+| `/spinner interval 5` | Seconds each half stays up when alternating (1 or more) |
+| `/spinner rotate 30` | New phrase every 30 seconds (`0` = one phrase per turn) |
+| `/spinner pack japanese` · `/spinner pack none` | Starter pack |
+| `/spinner file C:\words\es.json` | Word file (no path clears it) |
 
 ## Your own language
 

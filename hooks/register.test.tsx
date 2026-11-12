@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { conjugate, japanese } from './packs/japanese'
-import { parseWordFile } from './register'
+import { parseCommand, parseWordFile } from './register'
 
 const texts = (reading: string, group: 'godan' | 'ichidan' | 'irregular', gloss: string) =>
   conjugate(reading, group, gloss).map(it => `${it.text}| ${it.gloss}`)
@@ -75,6 +75,41 @@ test('a word file keeps valid rows and refuses a non-list', () => {
   expect(() => parseWordFile('not json')).toThrow()
 })
 
+test('/spinner picks one setting to change', () => {
+  expect(parseCommand('')).toEqual({ show: true })
+  expect(parseCommand('alternate')).toMatchObject({ field: 'display', value: 'alternate' })
+  expect(parseCommand('same-line')).toMatchObject({ field: 'display', value: 'same-line' })
+  expect(parseCommand('interval 5')).toMatchObject({ field: 'intervalSeconds', value: 5 })
+  expect(parseCommand('rotate 30')).toMatchObject({ field: 'rotateSeconds', value: 30 })
+  expect(parseCommand('rotate 0')).toMatchObject({ field: 'rotateSeconds', value: 0 })
+  expect(parseCommand('pack none')).toMatchObject({ field: 'pack', value: 'none' })
+  expect(parseCommand('file C:\\My Words\\es.json')).toMatchObject({ field: 'wordFile', value: 'C:\\My Words\\es.json' })
+  expect(parseCommand('file')).toMatchObject({ field: 'wordFile', value: '' })
+})
+
+test('/spinner refuses what it cannot use', () => {
+  for (const bad of ['interval', 'interval 0', 'interval x', 'rotate -1', 'rotate', 'pack french', 'banana']) {
+    expect(parseCommand(bad)).toHaveProperty('error')
+  }
+})
+
+test('/spinner alternate writes the display row and says so', async ($, on) => {
+  const set: unknown[] = []
+  on('config.set', (_, e) => {
+    set.push({ key: e.key, value: e.value })
+
+    return { value: e.value }
+  })
+  on('command.register', () => ({ value: { command: 'spinner' } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const out = await $.command.run({ command: 'spinner', args: 'rotate 30' })
+
+  expect(set).toEqual([{ key: 'language-spinner.rotateSeconds', value: 30 }])
+  expect(out.text).toBe('New phrase every 30s.')
+})
+
 const SPINNER = {
   plugin: 'language-spinner',
   component: 'Spinner',
@@ -131,7 +166,7 @@ const draw = (on: any) =>
     return <Text>{`${e.props.word}${e.props.suffix}`}</Text>
   })
 
-test('the phrase switches after 15 seconds of one turn', async ($, on) => {
+test('the phrase switches after 20 seconds of one turn', async ($, on) => {
   const clock = mock.clock(on)
   on('prompt.submit', (_, e) => e)
   draw(on)
@@ -140,7 +175,7 @@ test('the phrase switches after 15 seconds of one turn', async ($, on) => {
   const ui = await $.ui.mount(SPINNER)
   const first = (await ui.find({ type: 'Text' }))?.text
 
-  await clock.advance(14000)
+  await clock.advance(19000)
   expect((await ui.find({ type: 'Text' }))?.text).toBe(first)
 
   await clock.advance(1000)
@@ -162,12 +197,15 @@ test(
     const ui = await $.ui.mount(SPINNER)
     const phrase = (await ui.find({ type: 'Text' }))?.text
 
-    await clock.advance(3000)
+    await clock.advance(4000)
+    expect((await ui.find({ type: 'Text' }))?.text).toBe(phrase)
+
+    await clock.advance(1000)
     const gloss = (await ui.find({ type: 'Text' }))?.text
     expect(gloss).not.toBe(phrase)
     expect(gloss).toMatch(/^(I'm|I was|let's|I want|I can)/)
 
-    await clock.advance(3000)
+    await clock.advance(5000)
     expect((await ui.find({ type: 'Text' }))?.text).toBe(phrase)
     await ui.unmount()
   },

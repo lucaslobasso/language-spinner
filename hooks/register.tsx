@@ -22,20 +22,85 @@ export function parseWordFile(text: string): Entry[] {
   })
 }
 
+const HINT = 'alternate | same-line | interval N | rotate N | pack japanese|none | file PATH'
+
+export type Change =
+  | { field: string; value: string | number; say: string }
+  | { show: true }
+  | { error: string }
+
+/** What a `/spinner` argument line asks for: one setting to change, the settings to show, or an error. */
+export function parseCommand(args: string): Change {
+  const [, word = '', rest = ''] = args.trim().match(/^(\S+)\s*(.*)$/) ?? []
+
+  switch (word) {
+    case '':
+      return { show: true }
+    case 'alternate':
+    case 'same-line':
+      return { field: 'display', value: word, say: `Display is now ${word}.` }
+    case 'interval':
+    case 'rotate': {
+      const n = Number(rest)
+      const min = word === 'interval' ? 1 : 0
+
+      if (rest === '' || !Number.isFinite(n) || n < min) {
+        return { error: `/spinner ${word} takes a number of seconds, ${min} or more.` }
+      }
+
+      return word === 'interval'
+        ? { field: 'intervalSeconds', value: n, say: `Alternate interval is now ${n}s.` }
+        : { field: 'rotateSeconds', value: n, say: n === 0 ? 'One phrase per turn.' : `New phrase every ${n}s.` }
+    }
+    case 'pack':
+      return rest === 'japanese' || rest === 'none'
+        ? { field: 'pack', value: rest, say: `Starter pack is now ${rest}.` }
+        : { error: '/spinner pack takes japanese or none.' }
+    case 'file':
+      return { field: 'wordFile', value: rest, say: rest === '' ? 'Word file cleared.' : `Word file is now ${rest}.` }
+    default:
+      return { error: `Unknown option "${word}". Try: ${HINT}` }
+  }
+}
+
 const seconds = (value: unknown, fallback: number) =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback
 
 export const register: Register = (on, options) => {
   const isAlternate = options.display === 'alternate'
-  const interval = Math.max(1, seconds(options.intervalSeconds, 3))
-  const rotate = seconds(options.rotateSeconds, 15)
+  const interval = Math.max(1, seconds(options.intervalSeconds, 5))
+  const rotate = seconds(options.rotateSeconds, 20)
   const separator = typeof options.separator === 'string' ? options.separator : '· '
   const wordFile = typeof options.wordFile === 'string' ? options.wordFile.trim() : ''
 
   let entries: Entry[] = options.pack === 'none' ? [] : japanese()
   let stop: (() => void) | null = null
 
+  on('command.run', { command: 'spinner' }, async ($, e) => {
+    const change = parseCommand(e.args ?? '')
+
+    if ('error' in change) {
+      return { text: change.error }
+    }
+
+    if ('show' in change) {
+      const rows = (await $.config.list()).filter(row => row.key.startsWith('language-spinner.'))
+
+      return { text: rows.map(row => `${row.key.slice('language-spinner.'.length)}: ${String(row.value)}`).join('\n') }
+    }
+
+    const done = await $.config.set({ key: `language-spinner.${change.field}`, value: change.value })
+
+    return { text: 'deny' in done ? `Could not change that setting: ${String(done.deny)}` : change.say }
+  })
+
   on('session.start', async ($, e, next) => {
+    await $.command.register({
+      name: 'spinner',
+      description: 'Change the language spinner: display, interval, rotation, pack, word file',
+      argumentHint: HINT,
+    })
+
     if (wordFile !== '') {
       try {
         const own = parseWordFile(await $.fs.read(wordFile))
